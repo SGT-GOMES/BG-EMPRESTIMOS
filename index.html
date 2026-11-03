@@ -867,54 +867,259 @@
         async function gerarComprovantePDF(loan, valor, tipo) {
             if (!window.jspdf) return alert("Erro no gerador de PDF.");
             const { jsPDF } = window.jspdf;
-            const doc = new jsPDF({ format: 'a5' }); 
+            const doc = new jsPDF({ format: 'a4' }); 
             
-            // Header e Logo
-            desenharLogoPDF(doc, 15, 12);
-            doc.setFontSize(18);
+            // Dados financeiros do contrato
+            const fin = getLoanFin(loan);
+            
+            // Data e Hora da Operação
+            const agora = new Date();
+            const dataHoraStr = formatarDataBR(getHojeISO()) + ' às ' + 
+                String(agora.getHours()).padStart(2, '0') + ':' + 
+                String(agora.getMinutes()).padStart(2, '0') + ':' + 
+                String(agora.getSeconds()).padStart(2, '0');
+                
+            // Código de Autenticação Bancária Único
+            const authCode = 'BG.' + 
+                Math.floor(1000 + Math.random() * 9000) + '.' + 
+                Math.floor(1000 + Math.random() * 9000) + '.' + 
+                Math.floor(1000 + Math.random() * 9000) + '.' + 
+                agora.getFullYear();
+
+            // Cálculo do Novo Saldo Devedor após este pagamento
+            let novoSaldoDevedor = fin.saldoDevedor;
+            let proximoVencimentoStr = formatarDataBR(adicionarMesesISO(loan.dataVencimento, 1));
+            
+            if (tipo === 'juros') {
+                novoSaldoDevedor = fin.saldoDevedor; // Capital continua o mesmo
+            } else if (tipo === 'parcela') {
+                novoSaldoDevedor = Math.max(0, fin.saldoDevedor - fin.amortizacaoMes);
+                if (loan.parcelaAtual >= loan.parcelasTotais) {
+                    novoSaldoDevedor = 0;
+                    proximoVencimentoStr = "Contrato Quitado";
+                }
+            } else if (tipo === 'quitacao') {
+                novoSaldoDevedor = 0;
+                proximoVencimentoStr = "Contrato Quitado";
+            }
+
+            // Paleta de Cores Estilo Bancário
+            const corAzulEscuro = [30, 58, 138];   // #1E3A8A
+            const corAzulMedio = [37, 99, 235];    // #2563EB
+            const corCinzaEscuro = [31, 41, 55];   // #1F2937
+            const corCinzaTexto = [75, 85, 99];    // #4B5563
+            const corFundoCaixa = [249, 250, 251]; // #F9FAFB
+            const corBordaCaixa = [229, 231, 235]; // #E5E7EB
+            const corVerdeFundo = [240, 253, 244]; // #F0FDF4
+            const corVerdeTexto = [22, 101, 52];   // #166534
+            const corVerdeBorda = [187, 247, 208]; // #BBF7D0
+
+            // 1. HEADER DO BANCO / EMISSORA
+            doc.setFillColor(...corAzulEscuro);
+            doc.rect(0, 0, 210, 42, 'F');
+            
+            // Logo BG Sofisticado
+            desenharLogoPDF(doc, 18, 14);
+            
+            // Nome da Instituição
+            doc.setTextColor(255, 255, 255);
             doc.setFont("helvetica", "bold");
-            doc.text("BG Empréstimos", 33, 20);
+            doc.setFontSize(20);
+            doc.text("BG Empréstimos", 36, 24);
             
-            doc.setFontSize(12);
-            doc.setFont("helvetica", "normal");
-            doc.text("Recibo de Pagamento", 15, 32);
-            doc.setDrawColor(200, 200, 200);
-            doc.line(15, 36, 133, 36);
-            
-            doc.setFontSize(10);
-            doc.text(`Cliente:`, 15, 46);
-            doc.setFont("helvetica", "bold");
-            doc.text(loan.nome, 30, 46);
-            
-            doc.setFont("helvetica", "normal");
-            doc.text(`Data:`, 15, 54);
-            doc.setFont("helvetica", "bold");
-            doc.text(formatarDataBR(getHojeISO()), 26, 54);
-            
-            doc.setFont("helvetica", "normal");
-            doc.text(`Valor Pago:`, 15, 62);
-            doc.setFont("helvetica", "bold");
-            doc.text(`R$ ${valor.toFixed(2)}`, 36, 62);
-            
-            doc.setFont("helvetica", "normal");
-            let ref = "Referente a: ";
-            if(tipo === 'juros') ref += loan.usaValorMinimo ? "Mensalidade (Valor Mínimo Juros)" : "Mensalidade (Juros)";
-            else if(tipo === 'parcela') ref += `Parcela ${loan.parcelaAtual} de ${loan.parcelasTotais} (Tabela Price)`;
-            else if(tipo === 'quitacao') ref += "Quitação Total do Contrato";
-            
-            let splitRef = doc.splitTextToSize(ref, 118);
-            doc.text(splitRef, 15, 70);
-            
-            doc.line(15, 85, 133, 85);
             doc.setFontSize(9);
-            doc.setTextColor(100, 100, 100);
-            doc.text("BG Empréstimos agradece a sua preferência.", 15, 93);
+            doc.setFont("helvetica", "normal");
+            doc.text("COMPROVANTE DE TRANSAÇÃO BANCÁRIA", 36, 31);
+            
+            doc.setFontSize(8);
+            doc.setTextColor(200, 220, 255);
+            doc.text("VIA DO CLIENTE", 192, 26, { align: "right" });
+
+            // 2. TÍTULO DO RECIBO E DATA
+            doc.setTextColor(...corCinzaEscuro);
+            doc.setFontSize(13);
+            doc.setFont("helvetica", "bold");
+            doc.text("Recibo de Pagamento", 18, 54);
+            
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text(`Data da Operação: ${dataHoraStr}`, 192, 54, { align: "right" });
+
+            doc.setDrawColor(...corBordaCaixa);
+            doc.setLineWidth(0.5);
+            doc.line(18, 58, 192, 58);
+
+            // 3. DESTAQUE DO VALOR PAGO
+            doc.setFillColor(...corVerdeFundo);
+            doc.setDrawColor(...corVerdeBorda);
+            doc.setLineWidth(1);
+            doc.roundedRect(18, 64, 174, 32, 4, 4, 'FD');
+
+            doc.setTextColor(...corVerdeTexto);
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "bold");
+            doc.text("VALOR RECEBIDO", 105, 73, { align: "center" });
+
+            doc.setFontSize(22);
+            doc.setFont("helvetica", "bold");
+            doc.text(formatarDinheiro(valor), 105, 87, { align: "center" });
+
+            // 4. QUADRO 1: DADOS DO CLIENTE / DEVEDOR
+            doc.setFillColor(...corFundoCaixa);
+            doc.setDrawColor(...corBordaCaixa);
+            doc.setLineWidth(0.5);
+            doc.roundedRect(18, 102, 174, 38, 3, 3, 'FD');
+
+            doc.setTextColor(...corAzulEscuro);
+            doc.setFontSize(10);
+            doc.setFont("helvetica", "bold");
+            doc.text("1. DADOS DO CLIENTE", 23, 111);
+            
+            doc.setDrawColor(220, 225, 235);
+            doc.line(23, 114, 187, 114);
+
+            doc.setFontSize(9);
+            doc.setTextColor(...corCinzaTexto);
+            doc.setFont("helvetica", "normal");
+            doc.text("Nome Completo:", 23, 122);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            doc.text(loan.nome, 60, 122);
+
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Telefone / WhatsApp:", 23, 130);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            doc.text(loan.telefone || "Não informado", 60, 130);
+
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Endereço:", 23, 136);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            doc.text(loan.endereco || "Não informado", 60, 136);
+
+            // 5. QUADRO 2: DETALHES DO CONTRATO DE EMPRÉSTIMO
+            doc.setFillColor(...corFundoCaixa);
+            doc.setDrawColor(...corBordaCaixa);
+            doc.roundedRect(18, 146, 174, 46, 3, 3, 'FD');
+
+            doc.setTextColor(...corAzulEscuro);
+            doc.setFontSize(10);
+            doc.setFont("helvetica", "bold");
+            doc.text("2. INFORMAÇÕES DO EMPRÉSTIMO", 23, 155);
+
+            doc.setDrawColor(220, 225, 235);
+            doc.line(23, 158, 187, 158);
+
+            // Coluna Esquerda
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Capital Contratado:", 23, 166);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            doc.text(formatarDinheiro(loan.valor), 60, 166);
+
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Modalidade:", 23, 174);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            let modalidadeStr = loan.tipoPagamento === 'price' ? 'Tabela Price (Parcelas Fixas)' : (loan.usaValorMinimo ? 'Mínimo Juros Fixado' : 'Apenas Juros Mensais');
+            doc.text(modalidadeStr, 60, 174);
+
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Taxa de Juros:", 23, 182);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            let taxaStr = (loan.tipoPagamento === 'juros' && loan.usaValorMinimo) ? 'Valor Mínimo Juros (R$ 150,00)' : `${loan.taxa.toFixed(2)}% a.m.`;
+            doc.text(taxaStr, 60, 182);
+
+            // Coluna Direita
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Data de Início:", 120, 166);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            doc.text(formatarDataBR(loan.dataEmprestimo), 150, 166);
+
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Referência:", 120, 174);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            let refParcelaStr = loan.tipoPagamento === 'price' ? `Parcela ${loan.parcelaAtual} de ${loan.parcelasTotais}` : 'Mensalidade de Juros';
+            doc.text(refParcelaStr, 150, 174);
+
+            // 6. QUADRO 3: DETALHAMENTO DA TRANSAÇÃO & SALDO ATUALIZADO
+            doc.setFillColor(...corFundoCaixa);
+            doc.setDrawColor(...corBordaCaixa);
+            doc.roundedRect(18, 198, 174, 46, 3, 3, 'FD');
+
+            doc.setTextColor(...corAzulEscuro);
+            doc.setFontSize(10);
+            doc.setFont("helvetica", "bold");
+            doc.text("3. RESUMO DA OPERAÇÃO E SALDO", 23, 207);
+
+            doc.setDrawColor(220, 225, 235);
+            doc.line(23, 210, 187, 210);
+
+            doc.setFontSize(9);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Tipo de Pagamento:", 23, 218);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            let descTipoStr = "Pagamento de Mensalidade (Juros)";
+            if (tipo === 'parcela') descTipoStr = `Amortização + Juros (Parcela ${loan.parcelaAtual}/${loan.parcelasTotais})`;
+            else if (tipo === 'quitacao') descTipoStr = "Quitação Integral do Contrato";
+            doc.text(descTipoStr, 65, 218);
+
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Saldo Devedor Restante:", 23, 226);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(novoSaldoDevedor === 0 ? [16, 185, 129] : corCinzaEscuro);
+            doc.text(formatarDinheiro(novoSaldoDevedor) + (novoSaldoDevedor === 0 ? " (QUITADO)" : ""), 65, 226);
+
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text("Próximo Vencimento:", 23, 234);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corCinzaEscuro);
+            doc.text(proximoVencimentoStr, 65, 234);
+
+            // 7. AUTENTICAÇÃO MECÂNICA E RODAPÉ
+            doc.setDrawColor(...corBordaCaixa);
+            doc.setLineWidth(0.5);
+            doc.line(18, 252, 192, 252);
+
+            doc.setFontSize(8);
+            doc.setFont("courier", "bold");
+            doc.setTextColor(...corCinzaTexto);
+            doc.text(`AUTENTICAÇÃO MECÂNICA: ${authCode}`, 18, 258);
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(7.5);
+            doc.setTextColor(130, 140, 150);
+            let notaTermo = "Este comprovante tem validade jurídica como recibo de quitação parcial ou total da parcela indicada, emitido por BG Empréstimos. Guarde este documento para o seu controle financeiro.";
+            let splitNota = doc.splitTextToSize(notaTermo, 174);
+            doc.text(splitNota, 18, 264);
+
+            doc.setFontSize(8);
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(...corAzulEscuro);
+            doc.text("BG Empréstimos • Soluções Financeiras", 105, 282, { align: "center" });
 
             const pdfBlob = doc.output('blob');
             const file = new File([pdfBlob], `Recibo_BG_${loan.nome.replace(/\s+/g, '_')}.pdf`, { type: 'application/pdf' });
             
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                try { await navigator.share({ files: [file], title: 'Recibo BG Empréstimos', text: 'Segue o seu recibo.' }); } 
+                try { await navigator.share({ files: [file], title: 'Recibo BG Empréstimos', text: 'Segue o seu comprovante oficial.' }); } 
                 catch (e) { doc.save(file.name); }
             } else { doc.save(file.name); }
         }
