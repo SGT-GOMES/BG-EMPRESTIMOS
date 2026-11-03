@@ -60,7 +60,7 @@
             <!-- Logo Sofisticado -->
             <div class="w-20 h-20 logo-icon-bg rounded-2xl flex items-center justify-center text-white mb-5 relative overflow-hidden">
                 <div class="absolute inset-0 bg-white opacity-10 rotate-45 transform scale-150 translate-x-4"></div>
-                <span class="text-3xl font-black tracking-tighter" style="font-family: Georgia, serif;">BG</span>
+                <span class="text-3xl font-black tracking-tighter" style="font-family: Times, serif;">BG</span>
             </div>
             
             <h1 class="text-2xl font-bold text-gray-800 mb-1">BG Empréstimos</h1>
@@ -88,7 +88,7 @@
         <div class="flex justify-between items-center mb-6">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 logo-icon-bg rounded-xl flex items-center justify-center text-white shadow-sm">
-                    <span class="text-lg font-black tracking-tighter" style="font-family: Georgia, serif;">BG</span>
+                    <span class="text-lg font-black tracking-tighter" style="font-family: Times, serif;">BG</span>
                 </div>
                 <div>
                     <h1 class="text-xl font-bold text-gray-800 tracking-tight">BG Empréstimos</h1>
@@ -528,7 +528,7 @@
             doc.roundedRect(x, y, 14, 14, 3, 3, 'F');
             
             doc.setTextColor(255, 255, 255);
-            doc.setFont("georgia", "bold");
+            doc.setFont("times", "bold");
             doc.setFontSize(14);
             doc.text("BG", x + 2.5, y + 9.5);
             
@@ -836,7 +836,7 @@
             }
         }
 
-        // PAGAMENTO E RECIBO
+                // PAGAMENTO E RECIBO
         async function acaoReceber(index, tipoAcao) {
             let loan = loans[index];
             if (!loan || loan.quitado) return;
@@ -857,7 +857,11 @@
 
             if (!confirm(`Confirmar recebimento de ${formatarDinheiro(valorPago)} e gerar recibo PDF?`)) return;
 
-            // 1. Atualizar Estado Financeiro PRIMEIRO
+            // Criar um clone exato de como o contrato estava ANTES do pagamento
+            // Isso garante que o recibo sairá com a "Parcela X" correta, em vez da parcela seguinte.
+            let loanSnapshot = JSON.parse(JSON.stringify(loan));
+
+            // 1. Atualizar Estado Financeiro
             if (!loan.pagamentos) loan.pagamentos = [];
             loan.pagamentos.push({
                 data: hojeStrLocal,
@@ -878,25 +882,25 @@
                 loan.quitado = true;
             }
 
-            // Salvar imediatamente no localStorage e atualizar a tela
+            // Guardar o novo estado no localStorage imediatamente e atualizar a tela
             localStorage.setItem('banco_gomes_dados', JSON.stringify(loans));
             renderLoans();
 
-            // 2. Gerar Comprovante PDF
+            // 2. Gerar Comprovante PDF usando o snapshot anterior e os dados de vencimento futuro
             try {
-                await gerarComprovantePDF(loan, valorPago, tipoAcao);
+                await gerarComprovantePDF(loanSnapshot, loan.quitado, loan.dataVencimento, valorPago, tipoAcao);
             } catch (err) {
                 console.error("Erro ao gerar PDF:", err);
-                alert("Pagamento registrado com sucesso! (Erro ao abrir PDF)");
+                alert("Pagamento registrado com sucesso! Porém houve um erro ao gerar o PDF. Verifique se o seu dispositivo permite gerar arquivos.");
             }
         }
 
-        async function gerarComprovantePDF(loan, valor, tipo) {
-            if (!window.jspdf) return alert("Erro no gerador de PDF.");
+        async function gerarComprovantePDF(loanSnapshot, isQuitadoFuturo, dataVencimentoFuturo, valor, tipo) {
+            if (!window.jspdf) return alert("Erro no gerador de PDF. Atualize a página e tente novamente.");
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF({ format: 'a4' }); 
             
-            const fin = getLoanFin(loan);
+            const fin = getLoanFin(loanSnapshot);
             
             const agora = new Date();
             const dataHoraStr = formatarDataBR(getHojeISO()) + ' às ' + 
@@ -910,10 +914,12 @@
                 Math.floor(1000 + Math.random() * 9000) + '.' + 
                 agora.getFullYear();
 
+            // Calcular o saldo devedor APÓS o pagamento, usando a referência de snapshot
             let novoSaldoDevedor = fin.saldoDevedor;
-            let proximoVencimentoStr = formatarDataBR(loan.dataVencimento);
+            if (tipo === 'parcela') novoSaldoDevedor = Math.max(0, fin.saldoDevedor - fin.amortizacaoMes);
+            let proximoVencimentoStr = formatarDataBR(dataVencimentoFuturo);
             
-            if (loan.quitado) {
+            if (isQuitadoFuturo || tipo === 'quitacao') {
                 novoSaldoDevedor = 0;
                 proximoVencimentoStr = "Contrato Quitado";
             }
@@ -997,21 +1003,21 @@
             doc.text("Nome Completo:", 23, 122);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(...corCinzaEscuro);
-            doc.text(loan.nome || 'Não informado', 65, 122);
+            doc.text(loanSnapshot.nome || 'Não informado', 65, 122);
 
             doc.setFont("helvetica", "normal");
             doc.setTextColor(...corCinzaTexto);
             doc.text("Telefone / WhatsApp:", 23, 130);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(...corCinzaEscuro);
-            doc.text(loan.telefone || "Não informado", 65, 130);
+            doc.text(loanSnapshot.telefone || "Não informado", 65, 130);
 
             doc.setFont("helvetica", "normal");
             doc.setTextColor(...corCinzaTexto);
             doc.text("Endereço:", 23, 136);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(...corCinzaEscuro);
-            doc.text(loan.endereco || "Não informado", 65, 136);
+            doc.text(loanSnapshot.endereco || "Não informado", 65, 136);
 
             // 5. QUADRO 2: INFORMAÇÕES DO EMPRÉSTIMO
             doc.setFillColor(...corFundoCaixa);
@@ -1032,14 +1038,14 @@
             doc.text("Capital Contratado:", 23, 166);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(...corCinzaEscuro);
-            doc.text(formatarDinheiro(loan.valor), 65, 166);
+            doc.text(formatarDinheiro(loanSnapshot.valor), 65, 166);
 
             doc.setFont("helvetica", "normal");
             doc.setTextColor(...corCinzaTexto);
             doc.text("Modalidade:", 23, 174);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(...corCinzaEscuro);
-            let modalidadeStr = loan.tipoPagamento === 'price' ? 'Tabela Price (Parcelas Fixas)' : (loan.usaValorMinimo ? 'Mínimo Juros Fixado' : 'Apenas Juros Mensais');
+            let modalidadeStr = loanSnapshot.tipoPagamento === 'price' ? 'Tabela Price (Parcelas Fixas)' : (loanSnapshot.usaValorMinimo ? 'Mínimo Juros Fixado' : 'Apenas Juros Mensais');
             doc.text(modalidadeStr, 65, 174);
 
             doc.setFont("helvetica", "normal");
@@ -1047,21 +1053,21 @@
             doc.text("Taxa / Condição:", 23, 182);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(...corCinzaEscuro);
-            doc.text(formatarTaxaLoan(loan), 65, 182);
+            doc.text(formatarTaxaLoan(loanSnapshot), 65, 182);
 
             doc.setFont("helvetica", "normal");
             doc.setTextColor(...corCinzaTexto);
             doc.text("Data de Início:", 125, 166);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(...corCinzaEscuro);
-            doc.text(formatarDataBR(loan.dataEmprestimo), 155, 166);
+            doc.text(formatarDataBR(loanSnapshot.dataEmprestimo), 155, 166);
 
             doc.setFont("helvetica", "normal");
             doc.setTextColor(...corCinzaTexto);
             doc.text("Referência:", 125, 174);
             doc.setFont("helvetica", "bold");
             doc.setTextColor(...corCinzaEscuro);
-            let refParcelaStr = loan.tipoPagamento === 'price' ? `Parcela ${loan.parcelaAtual} de ${loan.parcelasTotais}` : 'Mensalidade de Juros';
+            let refParcelaStr = loanSnapshot.tipoPagamento === 'price' ? `Parcela ${loanSnapshot.parcelaAtual} de ${loanSnapshot.parcelasTotais}` : 'Mensalidade de Juros';
             doc.text(refParcelaStr, 155, 174);
 
             // 6. QUADRO 3: RESUMO DA OPERAÇÃO
@@ -1084,7 +1090,7 @@
             doc.setFont("helvetica", "bold");
             doc.setTextColor(...corCinzaEscuro);
             let descTipoStr = "Pagamento de Mensalidade (Juros)";
-            if (tipo === 'parcela') descTipoStr = `Amortização + Juros (Parcela ${loan.parcelaAtual}/${loan.parcelasTotais})`;
+            if (tipo === 'parcela') descTipoStr = `Amortização + Juros (Parcela ${loanSnapshot.parcelaAtual}/${loanSnapshot.parcelasTotais})`;
             else if (tipo === 'quitacao') descTipoStr = "Quitação Integral do Contrato";
             doc.text(descTipoStr, 65, 218);
 
@@ -1092,8 +1098,15 @@
             doc.setTextColor(...corCinzaTexto);
             doc.text("Saldo Devedor Restante:", 23, 226);
             doc.setFont("helvetica", "bold");
-            doc.setTextColor(novoSaldoDevedor === 0 ? [16, 185, 129] : corCinzaEscuro);
-            doc.text(formatarDinheiro(novoSaldoDevedor) + (novoSaldoDevedor === 0 ? " (QUITADO)" : ""), 65, 226);
+            
+            // CORREÇÃO CRÍTICA DO BUG DE CORES: usar if/else em vez de array dentro de setTextColor
+            if (novoSaldoDevedor <= 0) {
+                doc.setTextColor(16, 185, 129); // Verde para quitado
+            } else {
+                doc.setTextColor(...corCinzaEscuro); // Cinza para normal
+            }
+            
+            doc.text(formatarDinheiro(novoSaldoDevedor) + (novoSaldoDevedor <= 0 ? " (QUITADO)" : ""), 65, 226);
 
             doc.setFont("helvetica", "normal");
             doc.setTextColor(...corCinzaTexto);
@@ -1125,7 +1138,7 @@
             doc.text("BG Empréstimos • Soluções Financeiras", 105, 282, { align: "center" });
 
             const pdfBlob = doc.output('blob');
-            const file = new File([pdfBlob], `Recibo_BG_${(loan.nome || 'Cliente').replace(/\s+/g, '_')}.pdf`, { type: 'application/pdf' });
+            const file = new File([pdfBlob], `Recibo_BG_${(loanSnapshot.nome || 'Cliente').replace(/\s+/g, '_')}.pdf`, { type: 'application/pdf' });
             
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
                 try { await navigator.share({ files: [file], title: 'Recibo BG Empréstimos', text: 'Segue o seu comprovante oficial.' }); } 
